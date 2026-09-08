@@ -59,3 +59,26 @@ func extractIssuerURL(token string) (string, error) {
 	}
 	return payload.Issuer, nil
 }
+
+type tokenClaims struct {
+	Issuer   string `json:"iss"`
+	Audience any    `json:"aud"`
+}
+
+func extractTokenClaims(token string) (tokenClaims, error) {
+	if strings.Count(token, ".") != 2 {
+		return tokenClaims{}, fmt.Errorf("oidc: malformed jwt, token must have 3 parts")
+	}
+
+	parts := strings.SplitN(token, ".", 3)
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return tokenClaims{}, fmt.Errorf("oidc: malformed jwt payload: %w", err)
+	}
+
+	claims := tokenClaims{}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return tokenClaims{}, fmt.Errorf("oidc: failed to unmarshal claims: %w", err)
+	}
+	return claims, nil
+}

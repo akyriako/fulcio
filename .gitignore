@@ -42,3 +42,6 @@ hack/tools/bin
 # macOS
 .DS_Store
 certificate-maker
+
+#dev config
+/dev

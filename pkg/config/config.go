@@ -27,6 +27,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -177,9 +178,55 @@ func MetaRegex(issuer string) (*regexp.Regexp, error) {
 // coming from an incoming OIDC token.  If no matching configuration
 // is found, then it returns `false`.
 func (fc *FulcioConfig) GetIssuer(issuerURL string) (OIDCIssuer, bool) {
+	// Preserve the existing lookup for backwards compatibility.
 	iss, ok := fc.OIDCIssuers[issuerURL]
 	if ok {
 		return iss, ok
+	}
+
+	// Support configurations where the map key is only a logical name.
+	for _, iss := range fc.OIDCIssuers {
+		if iss.IssuerURL == issuerURL {
+			return iss, true
+		}
+	}
+
+	for meta, iss := range fc.MetaIssuers {
+		re, err := MetaRegex(meta)
+		if err != nil {
+			continue // Shouldn't happen, we check parsing the config
+		}
+		if re.MatchString(issuerURL) {
+			// If it matches, then return a concrete OIDCIssuer
+			// configuration for this issuer URL.
+			return OIDCIssuer{
+				IssuerURL:             issuerURL,
+				ClientID:              iss.ClientID,
+				Type:                  iss.Type,
+				IssuerClaim:           iss.IssuerClaim,
+				SubjectDomain:         iss.SubjectDomain,
+				CIProvider:            iss.CIProvider,
+				SkipEmailVerification: iss.SkipEmailVerification,
+				CACert:                iss.CACert,
+			}, true
+		}
+	}
+
+	return OIDCIssuer{}, false
+}
+
+// GetIssuerForAudience looks up the issuer configuration for an `audience`
+// coming from an incoming OIDC token.  If no matching configuration
+// is found, then it returns `false`.
+func (fc *FulcioConfig) GetIssuerForAudience(issuerURL string, audiences []string) (OIDCIssuer, bool) {
+	for _, iss := range fc.OIDCIssuers {
+		if iss.IssuerURL != issuerURL {
+			continue
+		}
+
+		if slices.Contains(audiences, iss.ClientID) {
+			return iss, true
+		}
 	}
 
 	for meta, iss := range fc.MetaIssuers {
@@ -417,7 +464,14 @@ func (fc *FulcioConfig) insertVerifier(iss OIDCIssuer) error {
 		return err
 	}
 	cfg := &oidc.Config{ClientID: iss.ClientID}
-	fc.verifiers[iss.IssuerURL] = []*verifierWithConfig{{provider.Verifier(cfg), cfg}}
+	//fc.verifiers[iss.IssuerURL] = []*verifierWithConfig{{provider.Verifier(cfg), cfg}}
+	fc.verifiers[iss.IssuerURL] = append(
+		fc.verifiers[iss.IssuerURL],
+		&verifierWithConfig{
+			IDTokenVerifier: provider.Verifier(cfg),
+			Config:          cfg,
+		},
+	)
 	return nil
 }
 
