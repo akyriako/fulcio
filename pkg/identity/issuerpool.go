@@ -27,17 +27,18 @@ import (
 type IssuerPool []Issuer
 
 func (p IssuerPool) Authenticate(ctx context.Context, token string, opts ...config.InsecureOIDCConfigOption) (Principal, error) {
-	url, err := extractIssuerURL(token)
+	claims, err := extractTokenClaims(token)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, issuer := range p {
-		if issuer.Match(ctx, url) {
+		if issuer.Match(ctx, claims.Issuer, claims.Audience...) {
 			return issuer.Authenticate(ctx, token, opts...)
 		}
 	}
-	return nil, fmt.Errorf("failed to match issuer URL %s from token with any configured providers", url)
+
+	return nil, fmt.Errorf("failed to match issuer URL %s with audience %v from token with any configured providers", claims.Issuer, claims.Audience)
 }
 
 func extractIssuerURL(token string) (string, error) {
@@ -61,8 +62,8 @@ func extractIssuerURL(token string) (string, error) {
 }
 
 type tokenClaims struct {
-	Issuer   string `json:"iss"`
-	Audience any    `json:"aud"`
+	Issuer   string   `json:"iss"`
+	Audience []string `json:"aud"`
 }
 
 func extractTokenClaims(token string) (tokenClaims, error) {
@@ -76,9 +77,35 @@ func extractTokenClaims(token string) (tokenClaims, error) {
 		return tokenClaims{}, fmt.Errorf("oidc: malformed jwt payload: %w", err)
 	}
 
-	claims := tokenClaims{}
-	if err := json.Unmarshal(raw, &claims); err != nil {
+	var rawClaims struct {
+		Issuer   string `json:"iss"`
+		Audience any    `json:"aud"`
+	}
+	if err := json.Unmarshal(raw, &rawClaims); err != nil {
 		return tokenClaims{}, fmt.Errorf("oidc: failed to unmarshal claims: %w", err)
 	}
+
+	claims := tokenClaims{
+		Issuer: rawClaims.Issuer,
+	}
+
+	switch aud := rawClaims.Audience.(type) {
+	case string:
+		claims.Audience = []string{aud}
+
+	case []any:
+		for _, value := range aud {
+			s, ok := value.(string)
+			if !ok {
+				return tokenClaims{}, fmt.Errorf("oidc: invalid audience claim")
+			}
+			claims.Audience = append(claims.Audience, s)
+
+		}
+
+	default:
+		return tokenClaims{}, fmt.Errorf("oidc: invalid audience claim")
+	}
+
 	return claims, nil
 }

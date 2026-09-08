@@ -177,7 +177,21 @@ func MetaRegex(issuer string) (*regexp.Regexp, error) {
 // GetIssuer looks up the issuer configuration for an `issuerURL`
 // coming from an incoming OIDC token.  If no matching configuration
 // is found, then it returns `false`.
-func (fc *FulcioConfig) GetIssuer(issuerURL string) (OIDCIssuer, bool) {
+func (fc *FulcioConfig) GetIssuer(issuerURL string, audiences ...string) (OIDCIssuer, bool) {
+	if len(audiences) > 0 {
+		for _, iss := range fc.OIDCIssuers {
+			if iss.IssuerURL != issuerURL {
+				continue
+			}
+
+			if slices.Contains(audiences, iss.ClientID) {
+				return iss, true
+			}
+		}
+
+		return OIDCIssuer{}, false
+	}
+
 	// Preserve the existing lookup for backwards compatibility.
 	iss, ok := fc.OIDCIssuers[issuerURL]
 	if ok {
@@ -256,8 +270,8 @@ func (fc *FulcioConfig) GetIssuerForAudience(issuerURL string, audiences []strin
 // GetVerifier fetches a token verifier for the given `issuerURL`
 // coming from an incoming OIDC token.  If no matching configuration
 // is found, then it returns `false`.
-func (fc *FulcioConfig) GetVerifier(issuerURL string, opts ...InsecureOIDCConfigOption) (*oidc.IDTokenVerifier, bool) {
-	iss, ok := fc.GetIssuer(issuerURL)
+func (fc *FulcioConfig) GetVerifier(issuerURL string, audiences []string, opts ...InsecureOIDCConfigOption) (*oidc.IDTokenVerifier, bool) {
+	iss, ok := fc.GetIssuer(issuerURL, audiences...)
 	if !ok {
 		return nil, false
 	}

@@ -17,6 +17,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/sigstore/fulcio/pkg/config"
@@ -30,10 +31,14 @@ var (
 
 type baseIssuer struct {
 	issuerURL string
+	clientID  string
 }
 
-func Issuer(issuerURL string) identity.Issuer {
-	return &baseIssuer{issuerURL: issuerURL}
+func Issuer(issuerURL string, clientID string) identity.Issuer {
+	return &baseIssuer{
+		issuerURL: issuerURL,
+		clientID:  clientID,
+	}
 }
 
 // This is unimplemented for the base issuer, and should be implemented unique to each issuer
@@ -42,15 +47,28 @@ func (e *baseIssuer) Authenticate(ctx context.Context, token string, opts ...con
 }
 
 // Match is the same across issuers, so it doesn't need to be implemented anywhere else
-func (e *baseIssuer) Match(_ context.Context, url string) bool {
-	if url == e.issuerURL {
-		return true
+func (e *baseIssuer) Match(_ context.Context, url string, audiences ...string) bool {
+	match := url == e.issuerURL
+
+	if !match {
+		// If this is a MetaIssuer the issuer URL could be a regex
+		// Check if the regex is valid against the provided url
+		re, err := config.MetaRegex(e.issuerURL)
+		if err != nil {
+			return false
+		}
+
+		match = re.MatchString(url)
 	}
-	// If this is a MetaIssuer the issuer URL could be a regex
-	// Check if the regex is valid against the provided url
-	re, err := config.MetaRegex(e.issuerURL)
-	if err != nil {
+
+	if !match {
 		return false
 	}
-	return re.MatchString(url)
+
+	if e.clientID == "" {
+		return true
+	}
+
+	// The token must contain the configured client ID in its audiences.
+	return slices.Contains(audiences, e.clientID)
 }

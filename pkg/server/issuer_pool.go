@@ -55,27 +55,27 @@ func getIssuer(meta string, i config.OIDCIssuer) identity.Issuer {
 	}
 	switch i.Type {
 	case config.IssuerTypeEmail:
-		return email.Issuer(issuerURL)
+		return email.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeGithubWorkflow:
-		return github.Issuer(issuerURL) // nolint
+		return github.Issuer(issuerURL, i.ClientID) // nolint
 	case config.IssuerTypeCIProvider:
-		return ciprovider.Issuer(issuerURL)
+		return ciprovider.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeGitLabPipeline:
-		return gitlabcom.Issuer(issuerURL) // nolint
+		return gitlabcom.Issuer(issuerURL, i.ClientID) // nolint
 	case config.IssuerTypeBuildkiteJob:
-		return buildkite.Issuer(issuerURL) // nolint
+		return buildkite.Issuer(issuerURL, i.ClientID) // nolint
 	case config.IssuerTypeCodefreshWorkflow:
-		return codefresh.Issuer(issuerURL) // nolint
+		return codefresh.Issuer(issuerURL, i.ClientID) // nolint
 	case config.IssuerTypeChainguard:
-		return chainguard.Issuer(issuerURL)
+		return chainguard.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeKubernetes:
-		return kubernetes.Issuer(issuerURL)
+		return kubernetes.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeSpiffe:
-		return spiffe.Issuer(issuerURL)
+		return spiffe.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeURI:
-		return uri.Issuer(issuerURL)
+		return uri.Issuer(issuerURL, i.ClientID)
 	case config.IssuerTypeUsername:
-		return username.Issuer(issuerURL)
+		return username.Issuer(issuerURL, i.ClientID)
 	}
 	return nil
 }

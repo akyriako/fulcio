@@ -22,7 +22,7 @@ import (
 
 type Issuer interface {
 	// Match checks if this issuer can authenticate tokens from a given issuer URL
-	Match(ctx context.Context, url string) bool
+	Match(ctx context.Context, url string, audiences ...string) bool
 
 	// Authenticate ID token and return Principal on success. The ID token's signature
 	// is verified in the call -- invalid signature must result in an error.
