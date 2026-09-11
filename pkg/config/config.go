@@ -189,6 +189,32 @@ func (fc *FulcioConfig) GetIssuer(issuerURL string, audiences ...string) (OIDCIs
 			}
 		}
 
+		for meta, iss := range fc.MetaIssuers {
+			re, err := MetaRegex(meta)
+			if err != nil {
+				continue
+			}
+
+			if !re.MatchString(issuerURL) {
+				continue
+			}
+
+			if !slices.Contains(audiences, iss.ClientID) {
+				continue
+			}
+
+			return OIDCIssuer{
+				IssuerURL:             issuerURL,
+				ClientID:              iss.ClientID,
+				Type:                  iss.Type,
+				IssuerClaim:           iss.IssuerClaim,
+				SubjectDomain:         iss.SubjectDomain,
+				CIProvider:            iss.CIProvider,
+				SkipEmailVerification: iss.SkipEmailVerification,
+				CACert:                iss.CACert,
+			}, true
+		}
+
 		return OIDCIssuer{}, false
 	}
 
@@ -229,45 +255,7 @@ func (fc *FulcioConfig) GetIssuer(issuerURL string, audiences ...string) (OIDCIs
 	return OIDCIssuer{}, false
 }
 
-// GetIssuerForAudience looks up the issuer configuration for an `audience`
-// coming from an incoming OIDC token.  If no matching configuration
-// is found, then it returns `false`.
-func (fc *FulcioConfig) GetIssuerForAudience(issuerURL string, audiences []string) (OIDCIssuer, bool) {
-	for _, iss := range fc.OIDCIssuers {
-		if iss.IssuerURL != issuerURL {
-			continue
-		}
-
-		if slices.Contains(audiences, iss.ClientID) {
-			return iss, true
-		}
-	}
-
-	for meta, iss := range fc.MetaIssuers {
-		re, err := MetaRegex(meta)
-		if err != nil {
-			continue // Shouldn't happen, we check parsing the config
-		}
-		if re.MatchString(issuerURL) {
-			// If it matches, then return a concrete OIDCIssuer
-			// configuration for this issuer URL.
-			return OIDCIssuer{
-				IssuerURL:             issuerURL,
-				ClientID:              iss.ClientID,
-				Type:                  iss.Type,
-				IssuerClaim:           iss.IssuerClaim,
-				SubjectDomain:         iss.SubjectDomain,
-				CIProvider:            iss.CIProvider,
-				SkipEmailVerification: iss.SkipEmailVerification,
-				CACert:                iss.CACert,
-			}, true
-		}
-	}
-
-	return OIDCIssuer{}, false
-}
-
-// GetVerifier fetches a token verifier for the given `issuerURL`
+// GetVerifier fetches a token verifier for the given `issuerURL` and 'audience'
 // coming from an incoming OIDC token.  If no matching configuration
 // is found, then it returns `false`.
 func (fc *FulcioConfig) GetVerifier(issuerURL string, audiences []string, opts ...InsecureOIDCConfigOption) (*oidc.IDTokenVerifier, bool) {

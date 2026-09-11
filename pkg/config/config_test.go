@@ -837,7 +837,7 @@ func TestVerifierCache(t *testing.T) {
 	}
 
 	// make sure we get a hit
-	v, ok := fc.GetVerifier("issuer.dev")
+	v, ok := fc.GetVerifier("issuer.dev", []string{"sigstore"})
 	if !ok {
 		t.Fatal("unable to verifier")
 	}
@@ -846,7 +846,7 @@ func TestVerifierCache(t *testing.T) {
 	}
 
 	// get verifier with SkipExpiryCheck set, should fail on cache miss
-	_, ok = fc.GetVerifier("issuer.dev", WithSkipExpiryCheck())
+	_, ok = fc.GetVerifier("issuer.dev", []string{"sigstore"}, WithSkipExpiryCheck())
 	if ok {
 		t.Fatal("expected cache miss")
 	}
@@ -866,7 +866,7 @@ func TestVerifierCache(t *testing.T) {
 		},
 	}
 	// make sure we get a hit and the correct verifier is returned
-	v, ok = fc.GetVerifier("issuer.dev", WithSkipExpiryCheck())
+	v, ok = fc.GetVerifier("issuer.dev", []string{"sigstore"}, WithSkipExpiryCheck())
 	if !ok {
 		t.Fatal("unable to verifier")
 	}
@@ -923,7 +923,7 @@ func TestVerifierCacheWithCustomCA(t *testing.T) {
 		lru:       cache,
 	}
 
-	verifier, ok := fc.GetVerifier(server.URL)
+	verifier, ok := fc.GetVerifier(server.URL, []string{"sigstore"})
 	if !ok {
 		t.Fatal("expected to get verifier")
 	}
@@ -931,7 +931,7 @@ func TestVerifierCacheWithCustomCA(t *testing.T) {
 		t.Fatal("expected non-nil verifier")
 	}
 
-	cachedVerifier, ok := fc.GetVerifier(server.URL)
+	cachedVerifier, ok := fc.GetVerifier(server.URL, []string{"sigstore"})
 	if !ok {
 		t.Fatal("expected to get cached verifier")
 	}
@@ -939,7 +939,7 @@ func TestVerifierCacheWithCustomCA(t *testing.T) {
 		t.Fatal("cached verifier doesn't match original verifier")
 	}
 
-	verifierWithOptions, ok := fc.GetVerifier(server.URL, WithSkipExpiryCheck())
+	verifierWithOptions, ok := fc.GetVerifier(server.URL, []string{"sigstore"}, WithSkipExpiryCheck())
 	if !ok {
 		t.Fatal("expected to get verifier with options")
 	}
@@ -1064,7 +1064,7 @@ func TestVerifyK8sDefaultIssuer(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, ok := test.fc.GetVerifier(k8sIssuerURL)
+			_, ok := test.fc.GetVerifier(k8sIssuerURL, []string{"sigstore"})
 			if !ok {
 				t.Fatal("expected to get verifier")
 			}
@@ -1216,7 +1216,7 @@ func TestGetVerifier_CrossHostRedirectBlocked(t *testing.T) {
 	}
 
 	// This discovery fetch should fail because the cross-host redirect is blocked.
-	_, ok := fc.GetVerifier(serverA.URL)
+	_, ok := fc.GetVerifier(serverA.URL, []string{"sigstore"})
 	if ok {
 		t.Fatal("expected GetVerifier to fail due to blocked cross-host redirect")
 	}
@@ -1262,7 +1262,7 @@ func TestGetVerifier_SameHostRedirectAllowed(t *testing.T) {
 	}
 
 	// This discovery fetch should succeed because the redirect stays on the same host.
-	_, ok := fc.GetVerifier(server.URL)
+	_, ok := fc.GetVerifier(server.URL, []string{"sigstore"})
 	if !ok {
 		t.Fatal("expected GetVerifier to succeed with same-host redirect")
 	}
@@ -1398,7 +1398,7 @@ func TestGetVerifier_MetaIssuerK8sTokenNotLeaked(t *testing.T) {
 	}
 
 	// Fetch verifier for the external meta-issuer server URL
-	_, ok := fc.GetVerifier(server.URL)
+	_, ok := fc.GetVerifier(server.URL, []string{"sigstore"})
 	if !ok {
 		t.Fatal("expected to get verifier")
 	}
@@ -1492,11 +1492,132 @@ func TestGetVerifier_DirectConfiguredK8sIssuerGetsToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := fc.GetVerifier(server.URL); !ok {
+	if _, ok := fc.GetVerifier(server.URL, []string{"sigstore"}); !ok {
 		t.Fatal("expected to get verifier")
 	}
 
 	if !authorized.Load() {
 		t.Fatal("expected directly-configured non-default Kubernetes issuer to receive the in-cluster bearer token, but it did not")
+	}
+}
+
+func TestGetIssuer_SameURLDifferentAudience(t *testing.T) {
+	issuerURL := "https://issuer.example.com"
+
+	fc := &FulcioConfig{
+		OIDCIssuers: map[string]OIDCIssuer{
+			"ci": {
+				IssuerURL: issuerURL,
+				ClientID:  "sigstore",
+				Type:      IssuerTypeCIProvider,
+			},
+			"developer": {
+				IssuerURL: issuerURL,
+				ClientID:  "developer-client",
+				Type:      IssuerTypeEmail,
+			},
+		},
+	}
+
+	t.Run("select CI configuration", func(t *testing.T) {
+		got, ok := fc.GetIssuer(issuerURL, "sigstore")
+		if !ok {
+			t.Fatal("expected issuer to be found")
+		}
+
+		if got.ClientID != "sigstore" {
+			t.Fatalf("ClientID = %q, want %q", got.ClientID, "sigstore")
+		}
+
+		if got.Type != IssuerTypeCIProvider {
+			t.Fatalf("Type = %q, want %q", got.Type, IssuerTypeCIProvider)
+		}
+	})
+
+	t.Run("select developer configuration", func(t *testing.T) {
+		got, ok := fc.GetIssuer(issuerURL, "developer-client")
+		if !ok {
+			t.Fatal("expected issuer to be found")
+		}
+
+		if got.ClientID != "developer-client" {
+			t.Fatalf(
+				"ClientID = %q, want %q",
+				got.ClientID,
+				"developer-client",
+			)
+		}
+
+		if got.Type != IssuerTypeEmail {
+			t.Fatalf("Type = %q, want %q", got.Type, IssuerTypeEmail)
+		}
+	})
+
+	t.Run("reject unknown audience", func(t *testing.T) {
+		_, ok := fc.GetIssuer(issuerURL, "unknown")
+		if ok {
+			t.Fatal("expected issuer lookup to reject unknown audience")
+		}
+	})
+
+	t.Run("match one audience from multiple", func(t *testing.T) {
+		got, ok := fc.GetIssuer(
+			issuerURL,
+			"something-else",
+			"developer-client",
+		)
+		if !ok {
+			t.Fatal("expected issuer to be found")
+		}
+
+		if got.ClientID != "developer-client" {
+			t.Fatalf(
+				"ClientID = %q, want %q",
+				got.ClientID,
+				"developer-client",
+			)
+		}
+	})
+}
+
+func TestGetIssuer_MetaIssuerWithAudience(t *testing.T) {
+	fc := &FulcioConfig{
+		MetaIssuers: map[string]OIDCIssuer{
+			"https://oidc.example.com/*": {
+				ClientID: "sigstore",
+				Type:     IssuerTypeCIProvider,
+			},
+		},
+	}
+
+	got, ok := fc.GetIssuer(
+		"https://oidc.example.com/cluster-a",
+		"sigstore",
+	)
+	if !ok {
+		t.Fatal("expected MetaIssuer to match issuer and audience")
+	}
+
+	if got.ClientID != "sigstore" {
+		t.Fatalf("ClientID = %q, want %q", got.ClientID, "sigstore")
+	}
+}
+
+func TestGetIssuer_MetaIssuerRejectsWrongAudience(t *testing.T) {
+	fc := &FulcioConfig{
+		MetaIssuers: map[string]OIDCIssuer{
+			"https://oidc.example.com/*": {
+				ClientID: "sigstore",
+			},
+		},
+	}
+
+	_, ok := fc.GetIssuer(
+		"https://oidc.example.com/cluster-a",
+		"wrong-audience",
+	)
+
+	if ok {
+		t.Fatal("expected MetaIssuer lookup to reject wrong audience")
 	}
 }

@@ -27,15 +27,19 @@ import (
 func TestIssuer(t *testing.T) {
 	ctx := context.Background()
 	url := "test-issuer-url"
-	issuer := Issuer(url)
+	audience := "test-audience"
+	issuer := Issuer(url, audience)
 
 	// test the Match function
 	t.Run("match", func(t *testing.T) {
-		if matches := issuer.Match(ctx, url); !matches {
-			t.Fatal("expected url to match but it doesn't")
+		if matches := issuer.Match(ctx, url, audience); !matches {
+			t.Fatal("expected url and audience to match but they don't")
 		}
-		if matches := issuer.Match(ctx, "some-other-url"); matches {
-			t.Fatal("expected match to fail but it didn't")
+		if matches := issuer.Match(ctx, "some-other-url", audience); matches {
+			t.Fatal("expected match to fail for different url but it didn't")
+		}
+		if matches := issuer.Match(ctx, url, "some-other-audience"); matches {
+			t.Fatal("expected match to fail for different audience but it didn't")
 		}
 	})
 

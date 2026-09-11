@@ -17,7 +17,10 @@ package identity
 import (
 	"context"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/sigstore/fulcio/pkg/config"
@@ -36,12 +39,12 @@ func (p testPrincipal) Embed(_ context.Context, _ *x509.Certificate) error {
 }
 
 type testIssuer struct {
-	match func(context.Context, string) bool
+	match func(context.Context, string, ...string) bool
 	auth  func(context.Context, string) (Principal, error)
 }
 
-func (i testIssuer) Match(ctx context.Context, url string) bool {
-	return i.match(ctx, url)
+func (i testIssuer) Match(ctx context.Context, url string, audiences ...string) bool {
+	return i.match(ctx, url, audiences...)
 }
 
 func (i testIssuer) Authenticate(ctx context.Context, token string, _ ...config.InsecureOIDCConfigOption) (Principal, error) {
@@ -56,7 +59,7 @@ func TestIssuerPool(t *testing.T) {
 
 		// Example issuers
 		bobIfExampleCom = testIssuer{
-			match: func(_ context.Context, url string) bool {
+			match: func(_ context.Context, url string, _ ...string) bool {
 				return url == `example.com`
 			},
 			auth: func(context.Context, string) (Principal, error) {
@@ -64,7 +67,7 @@ func TestIssuerPool(t *testing.T) {
 			},
 		}
 		aliceIfOtherCom = testIssuer{
-			match: func(_ context.Context, url string) bool {
+			match: func(_ context.Context, url string, _ ...string) bool {
 				return url == `other.com`
 			},
 			auth: func(context.Context, string) (Principal, error) {
@@ -72,11 +75,36 @@ func TestIssuerPool(t *testing.T) {
 			},
 		}
 		matchThenRejectAll = testIssuer{
-			match: func(context.Context, string) bool {
+			match: func(context.Context, string, ...string) bool {
 				return true
 			},
 			auth: func(context.Context, string) (Principal, error) {
 				return nil, errors.New(`boooooo`)
+			},
+		}
+		developerIfExampleCom = testIssuer{
+			match: func(_ context.Context, url string, audiences ...string) bool {
+				if url != "example.com" {
+					return false
+				}
+
+				return slices.Contains(audiences, "developer-client")
+			},
+			auth: func(context.Context, string) (Principal, error) {
+				return alice, nil
+			},
+		}
+
+		ciIfExampleCom = testIssuer{
+			match: func(_ context.Context, url string, audiences ...string) bool {
+				if url != "example.com" {
+					return false
+				}
+
+				return slices.Contains(audiences, "sigstore")
+			},
+			auth: func(context.Context, string) (Principal, error) {
+				return bob, nil
 			},
 		}
 
@@ -139,6 +167,56 @@ func TestIssuerPool(t *testing.T) {
 			Pool:    IssuerPool{matchThenRejectAll},
 			Token:   exampleToken,
 			WantErr: true,
+		},
+		`same issuer should select developer identity by audience`: {
+			Pool: IssuerPool{
+				ciIfExampleCom,
+				developerIfExampleCom,
+			},
+			Token: testToken(
+				t,
+				`{"iss":"example.com","aud":"developer-client"}`,
+			),
+			ExpectedPrincipal: alice,
+			WantErr:           false,
+		},
+
+		`same issuer should select CI identity by audience`: {
+			Pool: IssuerPool{
+				developerIfExampleCom,
+				ciIfExampleCom,
+			},
+			Token: testToken(
+				t,
+				`{"iss":"example.com","aud":"sigstore"}`,
+			),
+			ExpectedPrincipal: bob,
+			WantErr:           false,
+		},
+
+		`same issuer should reject unknown audience`: {
+			Pool: IssuerPool{
+				ciIfExampleCom,
+				developerIfExampleCom,
+			},
+			Token: testToken(
+				t,
+				`{"iss":"example.com","aud":"unknown-client"}`,
+			),
+			WantErr: true,
+		},
+
+		`same issuer should match audience array`: {
+			Pool: IssuerPool{
+				ciIfExampleCom,
+				developerIfExampleCom,
+			},
+			Token: testToken(
+				t,
+				`{"iss":"example.com","aud":["other","developer-client"]}`,
+			),
+			ExpectedPrincipal: alice,
+			WantErr:           false,
 		},
 	}
 
@@ -212,4 +290,87 @@ func TestExtractIssuerURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractTokenClaims(t *testing.T) {
+	tests := []struct {
+		name             string
+		claims           string
+		expectedIssuer   string
+		expectedAudience []string
+		wantErr          bool
+	}{
+		{
+			name:             "single audience",
+			claims:           `{"iss":"example.com","aud":"sigstore"}`,
+			expectedIssuer:   "example.com",
+			expectedAudience: []string{"sigstore"},
+		},
+		{
+			name:             "multiple audiences",
+			claims:           `{"iss":"example.com","aud":["sigstore","other"]}`,
+			expectedIssuer:   "example.com",
+			expectedAudience: []string{"sigstore", "other"},
+		},
+		{
+			name:    "invalid audience type",
+			claims:  `{"iss":"example.com","aud":123}`,
+			wantErr: true,
+		},
+		{
+			name:    "non-string audience in array",
+			claims:  `{"iss":"example.com","aud":["sigstore",123]}`,
+			wantErr: true,
+		},
+		{
+			name:    "non-string audience in array",
+			claims:  `{"iss":"example.com","aud":["sigstore",123]}`,
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			token := testToken(t, test.claims)
+
+			got, err := extractTokenClaims(token)
+			if err != nil {
+				if !test.wantErr {
+					t.Fatal(err)
+				}
+				return
+			}
+
+			if test.wantErr {
+				t.Fatal("expected error")
+			}
+
+			if got.Issuer != test.expectedIssuer {
+				t.Errorf(
+					"issuer = %q, want %q",
+					got.Issuer,
+					test.expectedIssuer,
+				)
+			}
+
+			if !slices.Equal(got.Audience, test.expectedAudience) {
+				t.Errorf(
+					"audience = %v, want %v",
+					got.Audience,
+					test.expectedAudience,
+				)
+			}
+		})
+	}
+}
+
+func testToken(t *testing.T, claims string) string {
+	t.Helper()
+
+	header := base64.RawURLEncoding.EncodeToString(
+		[]byte(`{"alg":"none","typ":"JWT"}`),
+	)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(claims))
+
+	return fmt.Sprintf("%s.%s.%s", header, payload, "signature")
 }

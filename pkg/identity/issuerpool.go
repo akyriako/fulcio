@@ -90,6 +90,8 @@ func extractTokenClaims(token string) (tokenClaims, error) {
 	}
 
 	switch aud := rawClaims.Audience.(type) {
+	case nil:
+
 	case string:
 		claims.Audience = []string{aud}
 
@@ -99,8 +101,8 @@ func extractTokenClaims(token string) (tokenClaims, error) {
 			if !ok {
 				return tokenClaims{}, fmt.Errorf("oidc: invalid audience claim")
 			}
-			claims.Audience = append(claims.Audience, s)
 
+			claims.Audience = append(claims.Audience, s)
 		}
 
 	default:

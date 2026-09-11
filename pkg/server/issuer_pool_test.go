@@ -47,7 +47,7 @@ func TestIssuerPool(t *testing.T) {
 	}
 	// Build the expected issuer pool
 	expected := identity.IssuerPool{
-		email.Issuer("https://oauth2.sigstore.dev/auth"),
+		email.Issuer("https://oauth2.sigstore.dev/auth", "sigstore"),
 	}
 	ignoreOpts := []cmp.Option{base.CmpOptions}
 	got := NewIssuerPool(cfg)
@@ -65,7 +65,7 @@ func TestIssuerPool(t *testing.T) {
 		},
 	}
 	expected = identity.IssuerPool{
-		kubernetes.Issuer("https://oidc.eks.*.amazonaws.com/id/*"),
+		kubernetes.Issuer("https://oidc.eks.*.amazonaws.com/id/*", "bar"),
 	}
 	got = NewIssuerPool(cfg)
 	if d := cmp.Diff(expected, got, ignoreOpts...); d != "" {
@@ -74,6 +74,8 @@ func TestIssuerPool(t *testing.T) {
 }
 
 func TestGetIssuer(t *testing.T) {
+	clientID := "sigstore"
+
 	tests := []struct {
 		description string
 		issuer      config.OIDCIssuer
@@ -84,43 +86,49 @@ func TestGetIssuer(t *testing.T) {
 			issuer: config.OIDCIssuer{
 				IssuerURL: "email.com",
 				Type:      "email",
+				ClientID:  clientID,
 			},
-			expected: email.Issuer("email.com"),
+			expected: email.Issuer("email.com", clientID),
 		}, {
 			description: "github",
 			issuer: config.OIDCIssuer{
 				IssuerURL: "github.com",
 				Type:      "github-workflow",
+				ClientID:  clientID,
 			},
-			expected: github.Issuer("github.com"), // nolint
+			expected: github.Issuer("github.com", clientID), // nolint
 		}, {
 			description: "spiffe",
 			issuer: config.OIDCIssuer{
 				IssuerURL: "spiffe.com",
 				Type:      "spiffe",
+				ClientID:  clientID,
 			},
-			expected: spiffe.Issuer("spiffe.com"),
+			expected: spiffe.Issuer("spiffe.com", clientID),
 		}, {
 			description: "kubernetes",
 			issuer: config.OIDCIssuer{
 				IssuerURL: "kubernetes.com",
 				Type:      "kubernetes",
+				ClientID:  clientID,
 			},
-			expected: kubernetes.Issuer("kubernetes.com"),
+			expected: kubernetes.Issuer("kubernetes.com", clientID),
 		}, {
 			description: "uri",
 			issuer: config.OIDCIssuer{
 				IssuerURL: "uri.com",
 				Type:      "uri",
+				ClientID:  clientID,
 			},
-			expected: uri.Issuer("uri.com"),
+			expected: uri.Issuer("uri.com", clientID),
 		}, {
 			description: "username",
 			issuer: config.OIDCIssuer{
 				IssuerURL: "username.com",
 				Type:      "username",
+				ClientID:  clientID,
 			},
-			expected: username.Issuer("username.com"),
+			expected: username.Issuer("username.com", clientID),
 		},
 	}
 
